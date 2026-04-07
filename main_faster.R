@@ -270,5 +270,8 @@ Input_Values[, KEEP_SACTN := .I == .I[1], by = .(LAKAZON, ISZAK, FIBC127_INT)]
 # 4. ICTUSE jelző (ezt minden sorra ki tudjuk számolni)
 Input_Values[, IS_ICT := as.numeric(FIBC128 == 1 | FIBC125 == 1)]
 
+Input_Values[, TS_START_CODE := sprintf("TS_%03d", FIBC127_INT)]
+Input_Values[, TS_END_CODE   := sprintf("TS_%03d", FIBC124_INT)]
+
 
 write.xlsx(Input_Values, "Altevékenységek_duration.xlsx", overwrite = TRUE)
