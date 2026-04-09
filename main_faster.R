@@ -143,7 +143,7 @@ Input_Values <- merge(altev, fotev[, .(LAKAZON, TEV, ISZAK, sorszam, FIBC128)],
 Input_Values <- Input_Values[!is.na(ALTEV) & ALTEV != ""]
 setorder(Input_Values, LAKAZON, TEV, ISZAK, sorszam)
 Input_Values <- Input_Values[, .(LAKAZON, ISZAK, ALTEV, FIBC128, FIBC125, FIBC127, FIBC124)]
-dim(Input_Values) # 77314 sor és 7 oszlop
+dim(Input_Values) # 77315 sor és 7 oszlop
 
 
 # 1. A kerekítő függvény (HH:MM formátumhoz)
@@ -308,3 +308,5 @@ for (i in c(1:nrow(Input_Values))) {
               (target_ts) := val]
   }
 }
+
+write.xlsx(EFILE, "EFILE_v1_fast_20260409.xlsx", overwrite = TRUE)
