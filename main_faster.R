@@ -13,7 +13,7 @@ EFILE <- read.xlsx("EFILE.xlsx", sheet = "Munka1", detectDates = TRUE)
 dim(EFILE) # 109550 sor és 153 oszlop
 setwd('../')
 setwd('SPSS')
-Input <- read_sav("Idomerleg_Kutatoszoba_20260313_imputalt_2.sav") # "Idomerleg_naplok_egyutt_plusz_mutatokkal_20260119_v3.sav"
+Input <- read_sav("Idomerleg_Kutatoszoba_20260313_imputalt_4.sav") # "Idomerleg_Kutatoszoba_20260313_imputalt_2.sav" # "Idomerleg_naplok_egyutt_plusz_mutatokkal_20260119_v3.sav"
 Input <- as.data.frame(Input)
 dim(Input) # 10955 sor és 4395 oszlop
 setwd('../')
@@ -57,15 +57,14 @@ for (i in c(1:nrow(Input))) { # 34:34 # nrow(Input) # c(1, 34) # 3540 nem jó!!!
   TS_START <- 1
   previous <- 0
   curr_lakazon <- Input$LAKAZON[i]
-  # print(curr_lakazon)
   curr_iszak <- Input$ISZAK[i]
   
   for (j in 1:65) {
     col_from <- paste0("FIBC126_", j)
     col_to   <- paste0("FIBC111_", j)
     
-    if (is.na(Input[[col_from]][i]) | Input[[col_from]][i] == "") break
-    if (is.na(Input[[col_to]][i]) | Input[[col_to]][i] == "") break
+    if (is.na(Input[[col_from]][i]) | Input[[col_from]][i] == "") next # break
+    if (is.na(Input[[col_to]][i]) | Input[[col_to]][i] == "") next # break
     
     from <- round_hms(as_hms(as.numeric(hm(Input[[col_from]][i]))), 600)
     to   <- round_hms(as_hms(as.numeric(hm(Input[[col_to]][i]))), 600)
@@ -76,15 +75,8 @@ for (i in c(1:nrow(Input))) { # 34:34 # nrow(Input) # c(1, 34) # 3540 nem jó!!!
     rounded_diff <- round_classic(diff_min)
     
     if (rounded_diff == 0){ 
-      # print("Különbség 0:")
-      # print(curr_lakazon)
-      # print(curr_iszak)
-      # print(j)
       next 
-      
     }
-    
-    # print(paste(from, to, diff_min, rounded_diff, Input[[paste0(val_cols[1], j)]][i], sep = ", "))
     
     if (rounded_diff > 0) {
       # Cél oszlopok nevei (TS_001, TS_002...)
@@ -106,11 +98,10 @@ for (i in c(1:nrow(Input))) { # 34:34 # nrow(Input) # c(1, 34) # 3540 nem jó!!!
 }
 
 
-write.xlsx(EFILE, "EFILE_v1_fast_20260407.xlsx", overwrite = TRUE)
+write.xlsx(EFILE, "EFILE_v1_fast_20260409.xlsx", overwrite = TRUE)
 
-# SAVE_EFILE <- EFILE
+SAVE_EFILE <- EFILE
 
-library(data.table)
 setDT(Input)
 
 # 1. FŐTEVÉKENYSÉGEK (1-64)
@@ -275,3 +266,45 @@ Input_Values[, TS_END_CODE   := sprintf("TS_%03d", FIBC124_INT)]
 
 
 write.xlsx(Input_Values, "Altevékenységek_duration.xlsx", overwrite = TRUE)
+
+
+
+
+# 1. Oszlopnevek generálása (TS_001, TS_002, ..., TS_144)
+ts_cols <- paste0("TS_", sprintf("%03d", 1:144))
+
+# 2. Értékek NA-ra állítása a feltételnek megfelelő sorokban
+EFILE[DCOLUMN %in% c("SACTN", "ICTUSE"), (ts_cols) := NA]
+
+# Előre definiáljuk a keresett oszlopokat, hogy ne a ciklusban kelljen stringet fűzni
+val_cols <- c("ALTEV", "IS_ICT")
+d_cols <- c("SACTN", "ICTUSE")
+Input_Values[, ISZAK := as.integer(as.character(factor(ISZAK, levels = c(4, 7, 10, 1))))]
+for (i in c(1:nrow(Input_Values))) { 
+  
+  if(i %% 100 == 0) cat("Feldolgozás:", i, "/", nrow(Input_Values), "\n")
+  
+  if (Input_Values[i, "KEEP_SACTN"] == FALSE){ 
+    next 
+  }
+  
+  curr_lakazon <- Input_Values$LAKAZON[i]
+  curr_iszak <- Input_Values$ISZAK[i]
+  
+  col_from <- "FIBC127_INT"
+  col_to   <- "FIBC124_INT"
+    
+  if (is.na(Input_Values[[col_from]][i]) | Input_Values[[col_from]][i] == "") next # break
+  if (is.na(Input_Values[[col_to]][i]) | Input_Values[[col_to]][i] == "") next # break
+    
+  # Cél oszlopok nevei (TS_001, TS_002...)
+  target_ts <- paste0("TS_", str_pad(Input_Values[[col_from]][i]:Input_Values[[col_to]][i], 3, pad = "0"))
+      
+  # Vektorizált kitöltés: egyszerre az összes DCOLUMN típusra
+  for (idx in seq_along(d_cols)) {
+    val <- Input_Values[[val_cols[idx]]][i] # as.character()
+    # data.table szűrés és in-place módosítás (:=)
+    EFILE[LAKAZON == curr_lakazon & ISZAK == curr_iszak & DCOLUMN == d_cols[idx], 
+              (target_ts) := val]
+  }
+}
