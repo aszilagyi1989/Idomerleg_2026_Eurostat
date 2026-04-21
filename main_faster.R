@@ -15,7 +15,7 @@ setwd('../')
 setwd('SPSS')
 Input <- read_sav("Idomerleg_Kutatoszoba_20260313_imputalt_4.sav") # "Idomerleg_Kutatoszoba_20260313_imputalt_2.sav" # "Idomerleg_naplok_egyutt_plusz_mutatokkal_20260119_v3.sav"
 Input <- as.data.frame(Input)
-dim(Input) # 10955 sor és 4395 oszlop
+dim(Input) # 10955 sor és 4396 oszlop
 setwd('../')
 print(getwd())
 
@@ -49,8 +49,8 @@ View(Input[Input$LAKAZON == "L01535469890", ])
 # L01535467977
 
 # Előre definiáljuk a keresett oszlopokat, hogy ne a ciklusban kelljen stringet fűzni
-val_cols <- c("FOTEV_KOD_", "where_", "ALONE", "FIBC113_", "FIBC114_", "FIBC115_", "FIBC116_", "FIBC117_")
-d_cols <- c("MACT", "WHERE", "ALONE", "WPARTNER", "WPARENT", "WCHILD", "WOTHERH", "WOTHERP")
+val_cols <- c("FOTEV_KOD_", "FIBC128_", "where_", "ALONE", "FIBC113_", "FIBC114_", "FIBC115_", "FIBC116_", "FIBC117_")
+d_cols <- c("MACT", "ICTUSE", "WHERE", "ALONE", "WPARTNER", "WPARENT", "WCHILD", "WOTHERH", "WOTHERP")
 for (i in c(1:nrow(Input))) { # 34:34 # nrow(Input) # c(1, 34) # 3540 nem jó!!!  # 3541:nrow(Input)  #3383 # 1:nrow(Input)
   if(i %% 100 == 0) cat("Feldolgozás:", i, "/", nrow(Input), "\n")
   
@@ -97,8 +97,11 @@ for (i in c(1:nrow(Input))) { # 34:34 # nrow(Input) # c(1, 34) # 3540 nem jó!!!
   }
 }
 
+# 2. Értékek NA-ra állítása a feltételnek megfelelő sorokban
+# EFILE[DCOLUMN %in% c("SACTN", "ICTUSE"), (ts_cols) := NA]
+EFILE[DCOLUMN %in% c("SACTN"), (ts_cols) := "-9"]
 
-write.xlsx(EFILE, "EFILE_v1_fast_20260409.xlsx", overwrite = TRUE)
+write.xlsx(EFILE, "EFILE_v1_fast_20260420.xlsx", overwrite = TRUE)
 
 SAVE_EFILE <- EFILE
 
@@ -161,7 +164,16 @@ round_time_text <- function(x) {
   perc <- parts[2]
   
   # 10 perces kerekítés
-  perc_ker <- round(perc / 10) * 10
+  # perc_ker <- round(perc / 10) * 10
+  # perc_ker <- (perc %/% 10) * 10
+  
+  # Ha az utolsó számjegy <= 5, akkor lefelé (egész osztás * 10)
+  # Ha az utolsó számjegy >= 6, akkor felfelé (egész osztás * 10 + 10)
+  if (perc %% 10 <= 5) {
+    perc_ker <- (perc %/% 10) * 10
+  } else {
+    perc_ker <- (perc %/% 10) * 10 + 10
+  }
   
   if (perc_ker == 60) {
     ora <- ora + 1
@@ -202,6 +214,8 @@ round_end_time <- function(x) {
 # 2. Új oszlopok létrehozása
 Input_Values[, FIBC127_RND := sapply(FIBC127, round_time_text)]
 Input_Values[, FIBC124_RND := sapply(FIBC124, round_end_time)]
+
+# SAVE_Input_Values <- Input_Values
 
 # View(Input[LAKAZON == "L01535428079" & ISZAK == "7", ])
 
@@ -265,16 +279,64 @@ Input_Values[, TS_START_CODE := sprintf("TS_%03d", FIBC127_INT)]
 Input_Values[, TS_END_CODE   := sprintf("TS_%03d", FIBC124_INT)]
 
 
-write.xlsx(Input_Values, "Altevékenységek_duration.xlsx", overwrite = TRUE)
+
+# --- 1. EREDETI ÁLLAPOT RÖGZÍTÉSE ---
+Input_Values[, temp_id := .I]
+
+# Időtartam számítása
+Input_Values[, duration := as.numeric(as.ITime(FIBC124) - as.ITime(FIBC127)) / 60]
+Input_Values[duration < 0, duration := duration + 1440]
+
+# --- 2. RENDEZÉS A SZÁMÍTÁSHOZ ---
+setorder(Input_Values, LAKAZON, ISZAK, -duration, temp_id)
+
+# --- 3. FINOMHANGOLT ÜTKÖZÉSVIZSGÁLAT ---
+Input_Values[, KEEP_SACTN := {
+  st <- FIBC127_INT
+  en <- FIBC124_INT_NYERS
+  n <- length(st)
+  
+  keep_vec <- rep(TRUE, n)
+  
+  if (n > 1) {
+    for (i in 2:n) {
+      if (is.na(st[i]) || is.na(en[i])) next
+      
+      for (j in 1:(i-1)) {
+        if (keep_vec[j] == FALSE) next
+        if (is.na(st[j]) || is.na(en[j])) next
+        
+        # SZIGORÚBB ÜTKÖZÉS-FELTÉTEL:
+        # Csak akkor vesszen el a rövidebb (i), ha:
+        # 1. A kezdőpontja (st) pontosan ugyanaz, mint a hosszabbé (st[j])
+        # 2. VAGY ha a két tevékenység között jelentős az átfedés (nem csak érintkeznek)
+        
+        is_same_start <- (st[i] == st[j])
+        # Valódi átfedés (overlap): a rövidebb belelóg a hosszabb idősávjába
+        is_inside <- (st[i] >= st[j] && st[i] < en[j]) || (en[i] > st[j] && en[i] <= en[j])
+        
+        if (is_same_start || is_inside) {
+          keep_vec[i] <- FALSE
+          break 
+        }
+      }
+    }
+  }
+  keep_vec
+}, by = .(LAKAZON, ISZAK)]
+
+# --- 4. AZ EREDETI SORREND VISSZAÁLLÍTÁSA ---
+# Ez a legfontosabb lépés az átláthatósághoz!
+setorder(Input_Values, LAKAZON, ISZAK, FIBC127, FIBC124)
+
+write.xlsx(Input_Values, "Altevékenységek_duration_jobb_3.xlsx", overwrite = TRUE)
 
 
-
+# SAVE_EFILE_ORIGINAL <- EFILE
+# EFILE <- SAVE_EFILE
 
 # 1. Oszlopnevek generálása (TS_001, TS_002, ..., TS_144)
 ts_cols <- paste0("TS_", sprintf("%03d", 1:144))
-
-# 2. Értékek NA-ra állítása a feltételnek megfelelő sorokban
-EFILE[DCOLUMN %in% c("SACTN", "ICTUSE"), (ts_cols) := NA]
 
 # Előre definiáljuk a keresett oszlopokat, hogy ne a ciklusban kelljen stringet fűzni
 val_cols <- c("ALTEV", "IS_ICT")
@@ -309,4 +371,4 @@ for (i in c(1:nrow(Input_Values))) {
   }
 }
 
-write.xlsx(EFILE, "EFILE_v1_fast_20260409.xlsx", overwrite = TRUE)
+write.xlsx(EFILE, "EFILE_v1_fast_20260421_3.xlsx", overwrite = TRUE)
